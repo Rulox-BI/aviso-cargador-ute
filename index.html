@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1220">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Aviso Cargador</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%2316a34a'/%3E%3Ctext x='50' y='70' font-size='60' text-anchor='middle'%3E%E2%9A%A1%3C/text%3E%3C/svg%3E">
+<style>
+  :root{--bg:#0b1220;--card:#141d2f;--line:#24314a;--txt:#eef2f8;--mut:#93a1b8;--ok:#22c55e;--okd:#15803d;--warn:#f59e0b;--bad:#ef4444;--acc:#38bdf8}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:17px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:16px 16px 40px;max-width:520px;margin-inline:auto}
+  h1{font-size:24px;margin:8px 0 4px}
+  .sub{color:var(--mut);margin:0 0 18px;font-size:15px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px;margin-bottom:14px}
+  .lbl{font-size:13px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:0 0 10px}
+  .pills{display:flex;gap:8px;flex-wrap:wrap}
+  .pill{flex:1;min-width:90px;padding:12px 8px;border-radius:12px;border:1px solid var(--line);background:transparent;color:var(--txt);font-size:16px}
+  .pill.on{background:var(--acc);border-color:var(--acc);color:#04121f;font-weight:700}
+  .st{display:flex;align-items:center;gap:10px;padding:6px 0}
+  .st+.st{border-top:1px solid var(--line);padding-top:12px;margin-top:6px}
+  .st .n{flex:1;font-weight:600}
+  .x{background:none;border:none;color:var(--mut);font-size:20px;padding:6px}
+  .go{border:none;border-radius:14px;background:var(--ok);color:#03200f;font-weight:800;font-size:17px;padding:14px 16px}
+  .go:active{background:var(--okd)}
+  .row{display:flex;gap:8px}
+  input{flex:1;min-width:0;background:#0d1626;border:1px solid var(--line);color:var(--txt);border-radius:12px;padding:12px;font-size:16px}
+  .btn2{border:1px solid var(--line);background:transparent;color:var(--txt);border-radius:12px;padding:12px 14px;font-size:16px}
+  .big{width:100%;padding:16px;font-size:18px}
+  .status{display:none}
+  .status.show{display:block}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--warn);margin-right:8px;animation:p 1.4s infinite}
+  @keyframes p{50%{opacity:.3}}
+  .stop{width:100%;margin-top:12px;border:none;border-radius:14px;background:var(--bad);color:#fff;font-weight:700;font-size:17px;padding:14px}
+  .link{color:var(--acc);background:none;border:none;font-size:15px;padding:8px 0;text-decoration:underline}
+  .msg{min-height:22px;color:var(--mut);font-size:15px;margin-top:8px}
+  ol{padding-left:20px;margin:8px 0}
+  li{margin:6px 0}
+  a{color:var(--acc)}
+  .hide{display:none}
+  .meta{display:block;font-weight:400;font-size:14px;color:var(--mut);margin-top:2px}
+  .star{background:none;border:none;font-size:22px;padding:6px;color:var(--warn)}
+  #near{margin-top:8px}
+</style>
+</head>
+<body>
+  <h1>⚡ Aviso Cargador</h1>
+  <p class="sub">Tocá tu cargador y te suena el celu cuando se libere.</p>
+
+  <!-- Configuración inicial (una sola vez) -->
+  <section id="setup" class="card hide">
+    <p class="lbl">Configuración (una sola vez)</p>
+    <ol>
+      <li>Tocá <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">crear llave en GitHub</a>.</li>
+      <li>Nombre: <b>aviso</b>. Vencimiento: <b>1 año</b>.</li>
+      <li>Repository access: <b>Only select repositories</b> → <b>aviso-cargador-ute</b>.</li>
+      <li>Permissions → Repository → <b>Actions: Read and write</b>.</li>
+      <li><b>Generate token</b>, copiala y pegala acá:</li>
+    </ol>
+    <div class="row"><input id="tok" placeholder="github_pat_…" autocomplete="off"><button class="btn2" id="saveTok">Guardar</button></div>
+    <div class="msg" id="setupMsg"></div>
+  </section>
+
+  <div id="app" class="hide">
+    <!-- Estado activo -->
+    <section id="status" class="card status">
+      <p class="lbl">Ahora</p>
+      <div id="statusTxt"></div>
+      <button class="stop" id="stop">Cancelar aviso</button>
+    </section>
+
+    <section class="card">
+      <p class="lbl">Conector</p>
+      <div class="pills" id="con"></div>
+    </section>
+
+    <section class="card">
+      <p class="lbl">Mis cargadores</p>
+      <div id="list"></div>
+      <div class="msg" id="msg"></div>
+    </section>
+
+    <section class="card">
+      <p class="lbl">Cerca mío</p>
+      <button class="btn2 big" id="gps">📍 Buscar cargadores cerca</button>
+      <div id="near"></div>
+      <div class="msg" id="nearMsg"></div>
+    </section>
+
+    <section class="card">
+      <p class="lbl">Agregar por nombre</p>
+      <div class="row"><input id="nuevo" placeholder="Ej: Nuevocentro"><button class="btn2" id="add">+</button></div>
+    </section>
+
+    <section class="card">
+      <p class="lbl">Vigilar durante</p>
+      <div class="pills" id="hrs"></div>
+    </section>
+
+    <button class="btn2 big" id="test">🔔 Probar la alarma</button>
+    <p style="text-align:center"><button class="link" id="reset">Cambiar llave</button></p>
+  </div>
+
+<script>
+const REPO = 'Rulox-BI/aviso-cargador-ute';
+const API = `https://api.github.com/repos/${REPO}/actions`;
+const store = {
+  get(k, d){ try{ const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); }catch{ return d; } },
+  set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch{} },
+  del(k){ try{ localStorage.removeItem(k); }catch{} },
+};
+const $ = (id) => document.getElementById(id);
+let estaciones = store.get('estaciones', ['Casino Parque Hotel']);
+let conector = store.get('conector', 'Tipo 2');
+let horas = store.get('horas', '4');
+let pollTimer = null;
+
+const token = () => store.get('token', '');
+async function gh(path, opts = {}){
+  const r = await fetch(API + path, { ...opts, headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token()}`, 'X-GitHub-Api-Version': '2022-11-28', ...(opts.headers||{}) } });
+  if (r.status === 401 || r.status === 403) throw new Error('La llave no sirve o no tiene permiso de Actions.');
+  if (!r.ok && r.status !== 204 && r.status !== 202) throw new Error(`GitHub respondió ${r.status}`);
+  return r.status === 204 || r.status === 202 ? null : r.json();
+}
+
+function pills(el, opts, cur, onPick){
+  el.innerHTML = '';
+  opts.forEach(([val, label]) => {
+    const b = document.createElement('button');
+    b.className = 'pill' + (val === cur ? ' on' : ''); b.textContent = label;
+    b.onclick = () => onPick(val);
+    el.appendChild(b);
+  });
+}
+function render(){
+  pills($('con'), [['Tipo 2','Tipo 2'],['CCS2','CCS2'],['Cualquiera','Cualquiera']], conector, v => { conector = v; store.set('conector', v); render(); refrescarEstados(); $('near').innerHTML = ''; });
+  pills($('hrs'), [['2','2 h'],['4','4 h'],['6','6 h']], horas, v => { horas = v; store.set('horas', v); render(); });
+  const list = $('list'); list.innerHTML = '';
+  estaciones.forEach((n, i) => {
+    const d = document.createElement('div'); d.className = 'st';
+    d.innerHTML = `<button class="x" title="Quitar">✕</button><span class="n"><span class="t"></span><span class="meta"></span></span><button class="go">⚡ Avisame</button>`;
+    d.querySelector('.t').textContent = n;
+    const info = buscarEstado(n);
+    d.querySelector('.meta').textContent = info ? estadoTxt(info.status) : '';
+    d.querySelector('.x').onclick = () => { if (estaciones.length > 1) { estaciones.splice(i,1); store.set('estaciones', estaciones); render(); } };
+    d.querySelector('.go').onclick = (e) => lanzar(n, false, e.target);
+    list.appendChild(d);
+  });
+}
+
+// ---------- Estado en vivo y GPS (lista pública de estaciones UTE) ----------
+const BRIDGE = 'https://ute-mueve.vercel.app/stations';
+let todas = [], todasConector = null;
+const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+const estadoTxt = (s) => ({ 0: '🟢 Libre ahora', 1: '🔴 Ocupado', 2: '⚪ Fuera de servicio', 3: '⚪ Sin conexión' })[s] ?? '';
+const buscarEstado = (n) => todas.find((s) => norm(s.name).includes(norm(n)));
+async function cargarEstaciones(){
+  if (todasConector === conector && todas.length) return todas;
+  const tipos = conector === 'Cualquiera' ? '' : `types=${encodeURIComponent(conector)}&`;
+  const r = await fetch(`${BRIDGE}?${tipos}statuses=available,charging,no-comm,unavailable&networks=PUBLIC`);
+  if (!r.ok) throw new Error('no pude leer la lista de UTE');
+  const j = await r.json();
+  todas = (j.data || []).filter((s) => typeof s.lat === 'number');
+  todasConector = conector;
+  return todas;
+}
+function km(a, b){
+  const R = 6371, t = (d) => d * Math.PI / 180;
+  const x = Math.sin(t(b.lat - a.lat) / 2) ** 2 + Math.cos(t(a.lat)) * Math.cos(t(b.lat)) * Math.sin(t(b.lng - a.lng) / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(x));
+}
+async function cerca(){
+  const out = $('near'), m = $('nearMsg');
+  out.innerHTML = ''; m.textContent = 'Buscando tu ubicación…';
+  if (!navigator.geolocation){ m.textContent = '⚠️ Este navegador no permite GPS.'; return; }
+  navigator.geolocation.getCurrentPosition(async (pos) => {
+    try{
+      m.textContent = 'Buscando cargadores…';
+      const yo = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      const lista = (await cargarEstaciones()).map((s) => ({ ...s, d: km(yo, s) })).sort((a, b) => a.d - b.d).slice(0, 6);
+      m.textContent = lista.length ? '' : 'No encontré cargadores.';
+      lista.forEach((s) => {
+        const d = document.createElement('div'); d.className = 'st';
+        const fav = estaciones.some((e) => norm(e) === norm(s.name));
+        d.innerHTML = `<button class="star" title="Guardar en Mis cargadores">${fav ? '★' : '☆'}</button><span class="n"><span class="t"></span><span class="meta"></span></span><button class="go">⚡ Avisame</button>`;
+        d.querySelector('.t').textContent = s.name;
+        d.querySelector('.meta').textContent = `${s.d < 1 ? Math.round(s.d * 1000) + ' m' : s.d.toFixed(1) + ' km'} · ${estadoTxt(s.status)}`;
+        d.querySelector('.star').onclick = (e) => {
+          if (!estaciones.some((x) => norm(x) === norm(s.name))){ estaciones.push(s.name); store.set('estaciones', estaciones); render(); }
+          e.target.textContent = '★';
+        };
+        d.querySelector('.go').onclick = (e) => lanzar(s.name, false, e.target, $('nearMsg'));
+        out.appendChild(d);
+      });
+    }catch(e){ m.textContent = '⚠️ ' + e.message; }
+  }, (err) => {
+    m.textContent = err.code === 1 ? '⚠️ Permití la ubicación para esta página y probá de nuevo.' : '⚠️ No pude obtener tu ubicación.';
+  }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
+}
+async function refrescarEstados(){ try{ todasConector = null; await cargarEstaciones(); render(); }catch{} }
+
+async function lanzar(estacion, prueba, btn, msgEl){
+  const msg = msgEl || $('msg'); msg.textContent = 'Enviando…';
+  if (btn) btn.disabled = true;
+  try{
+    await gh('/workflows/aviso.yml/dispatches', { method: 'POST', body: JSON.stringify({ ref: 'main', inputs: { estacion, conector, horas: String(horas), posponer_min: '10', prueba: String(prueba) } }) });
+    msg.textContent = prueba ? '🔔 Prueba enviada: en unos segundos suena.' : `✅ Listo. Te llega "👀 Vigilando" en el celu y podés cerrar esto.`;
+    store.set('ultima', { estacion, desde: Date.now(), prueba });
+    setTimeout(revisar, 6000);
+  }catch(e){ msg.textContent = '⚠️ ' + e.message; }
+  finally{ if (btn) btn.disabled = false; }
+}
+
+async function revisar(){
+  clearTimeout(pollTimer);
+  try{
+    const runs = await gh('/runs?event=workflow_dispatch&per_page=5');
+    const activo = (runs.workflow_runs || []).find(r => r.status === 'queued' || r.status === 'in_progress');
+    const s = $('status');
+    if (activo){
+      const u = store.get('ultima', {});
+      s.classList.add('show');
+      $('statusTxt').innerHTML = `<span class="dot"></span>Vigilando <b></b>`;
+      $('statusTxt').querySelector('b').textContent = u.prueba ? 'prueba de alarma' : (u.estacion || 'tu cargador');
+      $('stop').onclick = async () => {
+        $('stop').disabled = true;
+        try{ await gh(`/runs/${activo.id}/cancel`, { method: 'POST' }); $('statusTxt').textContent = 'Cancelado.'; }
+        catch(e){ $('statusTxt').textContent = '⚠️ ' + e.message; }
+        finally{ $('stop').disabled = false; setTimeout(revisar, 4000); }
+      };
+      pollTimer = setTimeout(revisar, 20000);
+    } else {
+      s.classList.remove('show');
+    }
+  }catch{}
+}
+
+function arrancar(){
+  const hay = !!token();
+  $('setup').classList.toggle('hide', hay);
+  $('app').classList.toggle('hide', !hay);
+  if (hay){ render(); revisar(); refrescarEstados(); }
+}
+$('gps').onclick = cerca;
+
+$('saveTok').onclick = async () => {
+  const t = $('tok').value.trim();
+  if (!t) return;
+  store.set('token', t);
+  $('setupMsg').textContent = 'Probando la llave…';
+  try{ await gh('/workflows/aviso.yml'); $('tok').value = ''; arrancar(); }
+  catch(e){ store.del('token'); $('setupMsg').textContent = '⚠️ ' + e.message; }
+};
+$('add').onclick = () => {
+  const n = $('nuevo').value.trim(); if (!n) return;
+  estaciones.push(n); store.set('estaciones', estaciones); $('nuevo').value = ''; render();
+};
+$('test').onclick = (e) => lanzar(estaciones[0], true, e.target);
+$('reset').onclick = () => { store.del('token'); arrancar(); };
+document.addEventListener('visibilitychange', () => { if (!document.hidden && token()){ revisar(); refrescarEstados(); } });
+arrancar();
+</script>
+</body>
+</html>
