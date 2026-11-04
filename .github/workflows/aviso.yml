@@ -1,0 +1,200 @@
+name: Avisame cuando se libere
+
+on:
+  workflow_dispatch:
+    inputs:
+      estacion:
+        description: "Nombre de la estación (o parte del nombre)"
+        default: "Casino Parque Hotel"
+        required: true
+      conector:
+        description: "Tipo de conector"
+        type: choice
+        options: ["Tipo 2", "CCS2", "Cualquiera"]
+        default: "Tipo 2"
+      horas:
+        description: "Máximo de horas vigilando"
+        default: "4"
+      posponer_min:
+        description: "Minutos al tocar Posponer"
+        default: "10"
+      prueba:
+        description: "Solo mandar una alarma de prueba al celular"
+        type: boolean
+        default: false
+
+concurrency:
+  group: aviso-ute
+  cancel-in-progress: true
+
+jobs:
+  vigilar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Vigilar cargador
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          ESTACION: ${{ inputs.estacion }}
+          CONECTOR: ${{ inputs.conector }}
+          HORAS: ${{ inputs.horas }}
+          POSPONER_MIN: ${{ inputs.posponer_min }}
+          PRUEBA: ${{ inputs.prueba }}
+        run: |
+          cat > aviso.mjs <<'EOF'
+          // Aviso de cargador libre (UTE Mueve) -> alarma en el celular vía ntfy.
+          // Lee solo el estado público de las estaciones (lo mismo que el mapa de la app).
+          const UTE = 'https://movilidadelectrica.ute.com.uy/api/v2';
+          const NTFY = 'https://ntfy.sh';
+          const TOPIC = process.env.NTFY_TOPIC;
+          const CTRL = `${TOPIC}-ctrl`;
+          const ESTACION = (process.env.ESTACION || '').trim();
+          const CONECTOR = process.env.CONECTOR || 'Tipo 2';
+          const HORAS = Number(process.env.HORAS) || 4;
+          const POSPONER = (Number(process.env.POSPONER_MIN) || 10) * 60_000;
+          const PRUEBA = process.env.PRUEBA === 'true';
+          const CADA = 60_000;            // revisa cada 1 minuto
+          const MAX_ALARMAS = 30;         // tope de repeticiones sin respuesta
+          const FIN = Date.now() + Math.min(HORAS, 5.8) * 3_600_000;
+          const INICIO = Math.floor(Date.now() / 1000);
+
+          if (!TOPIC) { console.error('Falta el secreto NTFY_TOPIC'); process.exit(1); }
+
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+          const hora = () => new Date().toLocaleTimeString('es-UY', { timeZone: 'America/Montevideo', hour: '2-digit', minute: '2-digit' });
+
+          // ---------- ntfy ----------
+          const botones = (alarma) => [
+            { action: 'http', label: alarma ? '✅ Ya estoy cargando' : '✖ Cancelar aviso', url: `${NTFY}/${CTRL}`, method: 'POST', body: 'stop', clear: true },
+            ...(alarma ? [{ action: 'http', label: `⏰ Posponer ${POSPONER / 60000} min`, url: `${NTFY}/${CTRL}`, method: 'POST', body: 'snooze', clear: true }] : []),
+          ];
+          async function avisar({ title, message, priority = 3, tags = [], alarma = false, acciones = true }) {
+            const body = { topic: TOPIC, title, message, priority, tags };
+            if (acciones) body.actions = botones(alarma);
+            try { await fetch(NTFY, { method: 'POST', body: JSON.stringify(body) }); }
+            catch (e) { console.error('ntfy:', e.message); }
+          }
+          const vistos = new Set();
+          async function ordenes() {
+            try {
+              const r = await fetch(`${NTFY}/${CTRL}/json?poll=1&since=${INICIO}`);
+              const out = [];
+              for (const line of (await r.text()).split('\n')) {
+                if (!line.trim()) continue;
+                const m = JSON.parse(line);
+                if (m.event === 'message' && !vistos.has(m.id)) { vistos.add(m.id); out.push(norm(m.message)); }
+              }
+              return out;
+            } catch { return []; }
+          }
+
+          // ---------- UTE ----------
+          const KEY = [...crypto.getRandomValues(new Uint8Array(7))].map((b) => b.toString(16).padStart(2, '0')).join('');
+          const HDR = { 'user-agent': 'Dart/3.4 (dart:io)', 'content-type': 'application/json; charset=utf-8', uniquekeyuser: KEY };
+          let token = null, tokenHasta = 0;
+          async function getToken() {
+            if (token && Date.now() < tokenHasta) return token;
+            const r = await fetch(`${UTE}/token`, { method: 'POST', headers: HDR, body: JSON.stringify({ clientIdIDP: 'cargaME', identifier: 'Anonymous' }) });
+            if (!r.ok) throw new Error(`token ${r.status}`);
+            const j = await r.json();
+            token = j.access_token; tokenHasta = Date.now() + ((j.expires_in || 600) - 60) * 1000;
+            return token;
+          }
+          const opt = (id, text, selected, extra = {}) => ({ id, internalCode: '', text, selected, icon: '', ...extra });
+          function filtros(soloDisponibles) {
+            const tipos = [['Tipo 2', 1, 'Tipo2'], ['CCS2', 2, 'CCS2'], ['CHAdeMO', 3, 'Chademo'], ['GB/T', 4, 'Gbt']];
+            return {
+              connectorTypes: tipos.map(([t, id, ic]) => opt(id, t, CONECTOR === 'Cualquiera' || CONECTOR === t, { icon: `assets/images/${ic}/desconocido.png` })),
+              connectorStatuses: [['Disponible', 1], ['Cargando', 2], ['Sin Comunicación', 3], ['No Disponible', 4]].map(([t, id]) => opt(id, t, soloDisponibles ? id === 1 : true)),
+              connectorPaymentTypes: [opt(1, 'Tarjeta RFID', true), opt(2, 'App', true)],
+              connectorPowers: [opt(1, '0', true)],
+              connectorCables: [opt(1, 'Con cable', true), opt(2, 'Sin cable', true)],
+              connectorNetworks: [['PUBLIC', 'Pública', 1], ['TAXI', 'Taxi', 2], ['DMC', 'DMC', 3], ['ONE', 'eOne', 4]].map(([c, t, id]) => opt(id, t, true, { internalCode: c })),
+            };
+          }
+          async function estaciones(soloDisponibles) {
+            for (let intento = 0; intento < 2; intento++) {
+              const r = await fetch(`${UTE}/station/statusFiltered`, {
+                method: 'POST', headers: { ...HDR, authorization: `Bearer ${await getToken()}` }, body: JSON.stringify(filtros(soloDisponibles)),
+              });
+              if (r.status === 401) { token = null; continue; }
+              if (!r.ok) throw new Error(`UTE ${r.status}`);
+              const j = await r.json();
+              return Array.isArray(j) ? j : (j.data || []);
+            }
+            throw new Error('UTE rechazó el token');
+          }
+          const coincide = (s) => norm(s.name).includes(norm(ESTACION)) || norm(s.address).includes(norm(ESTACION));
+          async function libres() {
+            const lista = (await estaciones(true)).filter(coincide);
+            if (!lista.length) return null;
+            const s = lista[0];
+            const cons = (s.connectors || []).filter((c) => /disp/i.test(c.status || c.statusDetails || 'disponible'));
+            return { nombre: s.name, cuantos: cons.length || 1 };
+          }
+
+          // ---------- flujo ----------
+          async function main() {
+            if (PRUEBA) {
+              await avisar({ title: '🔔 Prueba de alarma', message: 'Si escuchaste esto, el aviso del cargador está listo.', priority: 5, tags: ['electric_plug'], alarma: true });
+              console.log('Prueba enviada'); return;
+            }
+            // Validar que la estación exista
+            const todas = (await estaciones(false)).filter(coincide);
+            if (!todas.length) {
+              await avisar({ title: '⚠️ No encontré esa estación', message: `No hay ninguna estación UTE con "${ESTACION}" (${CONECTOR}). Probá con otra parte del nombre.`, priority: 4, acciones: false });
+              return;
+            }
+            const nombre = todas[0].name || ESTACION;
+            console.log(`Vigilando ${nombre} (${CONECTOR}) hasta ${new Date(FIN).toISOString()}`);
+            await avisar({ title: `👀 Vigilando ${nombre}`, message: `Te aviso con alarma cuando se libere un ${CONECTOR}. Reviso cada minuto, hasta ${HORAS} h.`, priority: 2, tags: ['eyes'] });
+
+            let estado = 'vigilar', alarmas = 0, despertar = 0, fallas = 0;
+            while (Date.now() < FIN) {
+              const cmds = await ordenes();
+              if (cmds.includes('stop')) {
+                await avisar({ title: '👍 Aviso apagado', message: estado === 'vigilar' ? 'Cancelaste la vigilancia.' : '¡Buena carga!', priority: 2, acciones: false });
+                return;
+              }
+              if (cmds.includes('snooze') && estado === 'alarma') {
+                estado = 'pospuesto'; despertar = Date.now() + POSPONER; alarmas = 0;
+                console.log(`${hora()} pospuesto`);
+              }
+              if (estado === 'pospuesto' && Date.now() < despertar) { await sleep(15_000); continue; }
+
+              let libre;
+              try { libre = await libres(); fallas = 0; }
+              catch (e) {
+                console.error(hora(), e.message);
+                if (++fallas === 10) await avisar({ title: '⚠️ No puedo leer UTE', message: `La app de UTE no responde (${e.message}). Sigo intentando.`, priority: 3 });
+                await sleep(CADA); continue;
+              }
+
+              if (libre) {
+                if (alarmas >= MAX_ALARMAS) {
+                  await avisar({ title: '😴 Apagué la alarma', message: 'No hubo respuesta en 30 minutos. Volvé a activarlo cuando quieras.', priority: 3, acciones: false });
+                  return;
+                }
+                estado = 'alarma'; alarmas++;
+                console.log(`${hora()} LIBRE (${libre.cuantos}) alarma #${alarmas}`);
+                await avisar({ title: `⚡ ¡Se liberó ${libre.nombre || nombre}!`, message: `${libre.cuantos} conector(es) ${CONECTOR} libre(s) a las ${hora()}. Tocá "Ya estoy cargando" para apagar.`, priority: 5, tags: ['rotating_light', 'electric_plug'], alarma: true });
+                await sleep(CADA);
+              } else {
+                if (estado !== 'vigilar') {
+                  await avisar({ title: '🚗 Se volvió a ocupar', message: `Alguien enchufó en ${nombre}. Sigo vigilando.`, priority: 3, tags: ['hourglass'] });
+                }
+                estado = 'vigilar'; alarmas = 0;
+                console.log(`${hora()} ocupado`);
+                await sleep(CADA);
+              }
+            }
+            await avisar({ title: '⌛ Terminó el tiempo', message: `Pasaron ${HORAS} h sin que se libere ${nombre}.`, priority: 3, acciones: false });
+          }
+          main().catch(async (e) => {
+            console.error(e);
+            await avisar({ title: '⚠️ El aviso se cortó', message: String(e.message || e), priority: 4, acciones: false });
+            process.exit(1);
+          });
+          EOF
+          node aviso.mjs
